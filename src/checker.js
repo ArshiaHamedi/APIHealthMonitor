@@ -1,7 +1,26 @@
 import http from 'node:http';
 import https from 'node:https';
 import { performance } from 'node:perf_hooks';
-import { classify } from './classify.js';
+import tls from 'node:tls';
+import { classify, isTlsError } from './classify.js';
+
+const certInfo = (c) => (c && c.valid_to
+  ? { validTo: new Date(c.valid_to).toISOString(), subject: c.subject?.CN ?? null, issuer: c.issuer?.O ?? c.issuer?.CN ?? null }
+  : null);
+
+// Reads a server's certificate without trusting it. Only used after a TLS failure,
+// so the dashboard can still show when a bad certificate expired. No request is sent.
+export function readCertificate(hostname, port = 443, timeoutMs = 5000) {
+  return new Promise((resolve) => {
+    const socket = tls.connect({ host: hostname, port, servername: hostname, rejectUnauthorized: false }, () => {
+      const cert = certInfo(socket.getPeerCertificate());
+      socket.end();
+      resolve(cert);
+    });
+    socket.setTimeout(timeoutMs, () => { socket.destroy(); resolve(null); });
+    socket.on('error', () => resolve(null));
+  });
+}
 
 const round = (n) => (n == null || Number.isNaN(n) ? null : Math.round(n * 10) / 10);
 
@@ -56,18 +75,19 @@ export function timedRequest({ url, method = 'GET', headers = {}, body, timeoutM
       socket.on('connect', () => { t.connect = performance.now(); });
       socket.on('secureConnect', () => {
         t.tls = performance.now();
-        const c = socket.getPeerCertificate();
-        if (c && c.valid_to) {
-          cert = {
-            validTo: new Date(c.valid_to).toISOString(),
-            subject: c.subject?.CN ?? null,
-            issuer: c.issuer?.O ?? c.issuer?.CN ?? null,
-          };
-        }
+        cert = certInfo(socket.getPeerCertificate());
       });
     });
 
-    req.on('error', (err) => done({ status: null, error: { code: err.code ?? 'UNKNOWN', message: err.message } }));
+    req.on('error', (err) => {
+      t.end = performance.now();
+      const result = { status: null, error: { code: err.code ?? 'UNKNOWN', message: err.message } };
+      if (u.protocol === 'https:' && isTlsError(err.code)) {
+        readCertificate(u.hostname, Number(u.port) || 443).then((c) => { cert = c; done(result); });
+      } else {
+        done(result);
+      }
+    });
 
     timer = setTimeout(() => {
       const err = new Error(`No complete response within ${timeoutMs} ms`);

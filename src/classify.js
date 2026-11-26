@@ -63,12 +63,14 @@ export const CATEGORIES = {
   },
 };
 
+export const isTlsError = (code = '') => TLS_CODES.has(code) || code.startsWith('ERR_TLS') || code.startsWith('ERR_SSL');
+
 function errorCategory(code = '') {
   if (code === 'ENOTFOUND' || code === 'EAI_AGAIN') return 'dns';
   if (code === 'ECONNREFUSED') return 'connection_refused';
   if (code === 'ECONNRESET' || code === 'EPIPE') return 'connection_reset';
   if (code === 'APP_TIMEOUT' || code === 'ETIMEDOUT') return 'timeout';
-  if (TLS_CODES.has(code) || code.startsWith('ERR_TLS') || code.startsWith('ERR_SSL')) return 'tls';
+  if (isTlsError(code)) return 'tls';
   return 'network';
 }
 
