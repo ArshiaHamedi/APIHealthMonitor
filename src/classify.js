@@ -61,6 +61,14 @@ export const CATEGORIES = {
     retryable: true,
     plain: 'A network problem stopped the request from completing.',
   },
+  udp_no_response: {
+    retryable: true,
+    plain: "No reply came back over UDP. A firewall may be blocking UDP traffic, which stops voice and video calls (WebRTC) from connecting directly. Calls then depend on a TURN relay over TCP or TLS, if one is available.",
+  },
+  stun_error: {
+    retryable: false,
+    plain: 'Something answered, but not with a valid STUN response. The address may not be a STUN server, or the server is misconfigured.',
+  },
 };
 
 export const isTlsError = (code = '') => TLS_CODES.has(code) || code.startsWith('ERR_TLS') || code.startsWith('ERR_SSL');
@@ -71,6 +79,8 @@ function errorCategory(code = '') {
   if (code === 'ECONNRESET' || code === 'EPIPE') return 'connection_reset';
   if (code === 'APP_TIMEOUT' || code === 'ETIMEDOUT') return 'timeout';
   if (isTlsError(code)) return 'tls';
+  if (code === 'STUN_TIMEOUT' || code === 'STUN_UNREACHABLE') return 'udp_no_response';
+  if (code === 'STUN_BAD_RESPONSE' || code === 'STUN_ERROR_RESPONSE') return 'stun_error';
   return 'network';
 }
 
@@ -85,12 +95,20 @@ function statusCategory(status, expected) {
 
 export function classify(result, endpoint = {}) {
   const expected = endpoint.expectedStatus ?? 200;
-  const category = result.error ? errorCategory(result.error.code) : statusCategory(result.status, expected);
-  const info = CATEGORIES[category];
+  let category;
+  let technical;
 
-  const technical = result.error
-    ? `${result.error.code}: ${result.error.message}`
-    : `HTTP ${result.status} (expected ${expected})`;
+  if (result.error) {
+    category = errorCategory(result.error.code);
+    technical = `${result.error.code}: ${result.error.message}`;
+  } else if (result.stun) {
+    category = 'ok';
+    technical = `STUN Binding success, public address ${result.stun.publicAddress}:${result.stun.publicPort}`;
+  } else {
+    category = statusCategory(result.status, expected);
+    technical = `HTTP ${result.status} (expected ${expected})`;
+  }
+  const info = CATEGORIES[category];
 
   return { ok: category === 'ok', category, retryable: info.retryable, technical, plain: info.plain };
 }

@@ -9,6 +9,8 @@ For every check it records:
 - **Retries** with exponential backoff and jitter. Rate-limited calls honour the `Retry-After` header. Auth and TLS failures are not retried, because retrying can't fix them.
 - **TLS certificate expiry**, flagged when under 14 days.
 - **Uptime history** in SQLite, shown as a 24-hour bar per endpoint.
+- **STUN over UDP**, the protocol WebRTC voice and video use to discover a client's public address. The check builds RFC 5389 Binding Requests by hand, resends lost UDP packets, and decodes the XOR-MAPPED-ADDRESS reply. A failure usually means a firewall is blocking UDP, which breaks direct real-time calls.
+- **One-click bug reports.** Each failing endpoint has a "Copy bug report" button that produces a Markdown ticket: summary, environment, impact (failing since when), a reproducible `curl` command, expected vs. actual result, diagnosis and every attempt's timings. API keys, tokens and auth headers are redacted.
 
 ## Requirements
 
@@ -25,7 +27,7 @@ Open http://localhost:3000.
 
 ### Offline demo with the mock API
 
-`mock/server.js` is a local API that fails on purpose (503s that recover, 429s, 401s, slow responses), so every failure type shows up in a demo.
+`mock/server.js` is a local API that fails on purpose (503s that recover, 429s, 401s, slow responses), plus two STUN servers on UDP 3478 and 3479. The one on 3479 drops the first packet of every request, to show retransmission recovering from packet loss.
 
 ```bash
 npm run mock         # terminal 1: mock API on port 4000
@@ -57,18 +59,27 @@ npm test
 
 Only `id` and `url` are required. Use another file with `node src/index.js my-endpoints.json`.
 
+For a STUN check, set `"type": "stun"` and use a `stun:host:port` URL:
+
+```json
+{ "id": "stun-google", "name": "Google STUN", "type": "stun", "url": "stun:stun.l.google.com:19302", "timeoutMs": 3000 }
+```
+
 ## API
 
 | Route | Returns |
 |---|---|
 | `GET /api/status` | Latest result, 24h uptime, hourly buckets and cert expiry for every endpoint |
 | `GET /api/history/:id` | The last 60 attempts for one endpoint, with timing breakdown and retry waits |
+| `GET /api/bugreport/:id` | A Markdown bug report for the endpoint's latest check (secrets redacted) |
 
 ## Project structure
 
 ```
 src/
   checker.js    HTTP(S) request with stage timings, retry with backoff, Retry-After parsing
+  stun.js       STUN Binding Request over UDP, retransmission, XOR-MAPPED-ADDRESS decoding
+  bugreport.js  Markdown bug report with a redacted, reproducible curl command
   classify.js   maps errors and status codes to causes, with technical and plain explanations
   db.js         SQLite storage and queries
   scheduler.js  runs each endpoint on its own interval, never overlapping
@@ -81,8 +92,8 @@ test/           unit tests (node:test)
 
 ## Roadmap
 
-- [ ] STUN/UDP check for WebRTC connectivity
-- [ ] "Copy bug report" with a reproducible curl command
+- [x] STUN/UDP check for WebRTC connectivity
+- [x] "Copy bug report" with a reproducible curl command
 - [ ] CORS preflight check
 - [ ] Webhook alerts (Discord or Slack) on state changes
 - [ ] Webhook receiver with HMAC signature verification

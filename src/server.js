@@ -2,6 +2,7 @@ import express from 'express';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { CATEGORIES } from './classify.js';
+import { buildBugReport, redactUrl, redactHeaders } from './bugreport.js';
 
 const publicDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'public');
 const HOUR = 3600 * 1000;
@@ -39,8 +40,8 @@ export function createServer(endpoints, db) {
       return {
         id: ep.id,
         name: ep.name,
-        method: ep.method ?? 'GET',
-        url: ep.url,
+        method: ep.type === 'stun' ? 'UDP' : ep.method ?? 'GET',
+        url: ep.type === 'stun' ? ep.url : redactUrl(ep.url),
         latest: latest && {
           ts: latest.ts,
           ok: !!latest.ok,
@@ -62,8 +63,21 @@ export function createServer(endpoints, db) {
   app.get('/api/history/:id', (req, res) => {
     const ep = endpoints.find((e) => e.id === req.params.id);
     if (!ep) return res.status(404).json({ error: `Unknown endpoint "${req.params.id}"` });
-    const rows = db.history(ep.id).map((r) => ({ ...r, plain: CATEGORIES[r.category]?.plain }));
-    res.json({ endpoint: ep, history: rows });
+    const rows = db.history(ep.id).map((r) => ({
+      ...r,
+      plain: CATEGORIES[r.category]?.plain,
+      detail: r.detail_json ? JSON.parse(r.detail_json) : null,
+    }));
+    const safeEndpoint = { ...ep, url: ep.type === 'stun' ? ep.url : redactUrl(ep.url), headers: redactHeaders(ep.headers) };
+    res.json({ endpoint: safeEndpoint, history: rows });
+  });
+
+  app.get('/api/bugreport/:id', (req, res) => {
+    const ep = endpoints.find((e) => e.id === req.params.id);
+    if (!ep) return res.status(404).type('text').send(`Unknown endpoint "${req.params.id}"`);
+    const attempts = db.lastCheck(ep.id);
+    if (!attempts.length) return res.status(404).type('text').send('No checks recorded yet. Try again in a minute.');
+    res.type('text').send(buildBugReport(ep, attempts, db.failureStreak(ep.id)));
   });
 
   return app;

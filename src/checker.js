@@ -3,6 +3,10 @@ import https from 'node:https';
 import { performance } from 'node:perf_hooks';
 import tls from 'node:tls';
 import { classify, isTlsError } from './classify.js';
+import { stunCheck } from './stun.js';
+
+// Picks the probe for an endpoint: STUN over UDP, or HTTP(S) by default.
+export const runProbe = (endpoint) => (endpoint.type === 'stun' ? stunCheck(endpoint) : timedRequest(endpoint));
 
 const certInfo = (c) => (c && c.valid_to
   ? { validTo: new Date(c.valid_to).toISOString(), subject: c.subject?.CN ?? null, issuer: c.issuer?.O ?? c.issuer?.CN ?? null }
@@ -118,7 +122,7 @@ export function backoffDelay(attempt, { baseMs = 1000, maxMs = 15000, random = M
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Runs a check with retries. Returns every attempt so the history shows the full story.
-export async function checkWithRetry(endpoint, { maxRetries = 2, baseMs = 1000, maxWaitMs = 15000, request = timedRequest, wait = sleep } = {}) {
+export async function checkWithRetry(endpoint, { maxRetries = 2, baseMs = 1000, maxWaitMs = 15000, request = runProbe, wait = sleep } = {}) {
   const attempts = [];
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     const result = await request(endpoint);

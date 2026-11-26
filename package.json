@@ -1,6 +1,6 @@
 {
   "name": "api-health-monitor",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Monitors REST APIs: availability, latency by network stage (DNS, TCP, TLS), failure classification, retries with backoff and certificate expiry.",
   "type": "module",
   "main": "src/index.js",

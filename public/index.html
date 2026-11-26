@@ -35,6 +35,10 @@
     .explain b { display: inline-block; width: 90px; color: var(--muted); font-weight: 500; }
     .hist { width: 100%; font-size: 12px; border: none; }
     .hist th, .hist td { padding: 6px 8px; }
+    .actions { margin: 0 0 12px; }
+    .copy-btn { font: inherit; font-size: 13px; padding: 6px 12px; border: 1px solid var(--accent); color: var(--accent); background: #fff; border-radius: 6px; cursor: pointer; }
+    .copy-btn:hover { background: #eef3f8; }
+    textarea.report { width: 100%; height: 220px; font: 12px ui-monospace, Consolas, monospace; margin-bottom: 12px; }
     code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
   </style>
 </head>
@@ -64,12 +68,14 @@
   const ms = (v) => (v == null ? '-' : `${Math.round(v)} ms`);
   let openId = null;
   let lastData = null;
+  let copyNote = null;
 
   function statusPill(latest) {
     if (!latest) return '<span class="muted">Waiting</span>';
-    if (latest.ok) return `<span class="pill up">${latest.status} OK</span>`;
+    if (latest.ok) return `<span class="pill up">${latest.status ? `${latest.status} OK` : 'OK'}</span>`;
     const soft = ['rate_limit', 'timeout'].includes(latest.category);
-    const label = latest.status ? `${latest.status} ${latest.category.replace('_', ' ')}` : latest.category.replace('_', ' ');
+    const name = latest.category.replaceAll('_', ' ');
+    const label = latest.status ? `${latest.status} ${name}` : name;
     return `<span class="pill ${soft ? 'degraded' : 'down'}">${esc(label)}</span>`;
   }
 
@@ -110,10 +116,15 @@
     if (!cell) return;
     const { history } = await (await fetch(`/api/history/${encodeURIComponent(id)}`)).json();
     const last = history[0];
+    const stun = last?.detail;
+    const note = copyNote && copyNote.id === id && Date.now() < copyNote.until ? copyNote : null;
     cell.innerHTML = `
       ${last ? `<p class="explain"><b>Technical</b>${esc(last.technical)}</p><p class="explain"><b>Plain</b>${esc(last.plain)}</p>` : ''}
+      ${stun ? `<p class="explain"><b>Public IP</b>${esc(stun.publicAddress)}:${esc(stun.publicPort)} <span class="muted">via ${esc(stun.server)}, ${esc(stun.packetsSent)} packet(s) sent</span></p>` : ''}
+      ${last && !last.ok ? `<p class="actions"><button class="copy-btn" data-id="${esc(id)}">Copy bug report</button> <span class="muted">${note ? esc(note.text) : 'Markdown with a reproducible command, ready for a JIRA ticket.'}</span></p>` : ''}
+      ${note?.fallback ? `<textarea class="report" readonly>${esc(note.fallback)}</textarea>` : ''}
       <table class="hist">
-        <thead><tr><th>Time</th><th>Attempt</th><th>Result</th><th>DNS</th><th>TCP</th><th>TLS</th><th>Server (TTFB)</th><th>Download</th><th>Total</th><th>Next retry</th></tr></thead>
+        <thead><tr><th>Time</th><th>Attempt</th><th>Result</th><th>DNS</th><th>TCP</th><th>TLS</th><th>Server / RTT</th><th>Download</th><th>Total</th><th>Next retry</th></tr></thead>
         <tbody>${history.map((h) => `
           <tr>
             <td>${new Date(h.ts).toLocaleTimeString()}</td>
@@ -127,7 +138,26 @@
       </table>`;
   }
 
+  async function copyBugReport(id) {
+    const res = await fetch(`/api/bugreport/${encodeURIComponent(id)}`);
+    const text = await res.text();
+    if (!res.ok) {
+      copyNote = { id, text, until: Date.now() + 8000 };
+    } else {
+      try {
+        await navigator.clipboard.writeText(text);
+        copyNote = { id, text: 'Copied. Paste it into a JIRA ticket or GitHub issue.', until: Date.now() + 8000 };
+      } catch {
+        copyNote = { id, text: "Couldn't access the clipboard. Select the text below and copy it.", fallback: text, until: Date.now() + 60000 };
+      }
+    }
+    loadDetail(id);
+  }
+
   document.getElementById('rows').addEventListener('click', (ev) => {
+    const btn = ev.target.closest('.copy-btn');
+    if (btn) return copyBugReport(btn.dataset.id);
+    if (ev.target.closest('tr.detail')) return;
     const row = ev.target.closest('tr.ep');
     if (!row) return;
     openId = openId === row.dataset.id ? null : row.dataset.id;

@@ -25,10 +25,14 @@ export function openDb(path = 'data/monitor.db') {
     CREATE INDEX IF NOT EXISTS idx_checks_endpoint_ts ON checks (endpoint_id, ts);
   `);
 
+  // Migration: databases created before the STUN check have no detail_json column.
+  const columns = db.prepare(`PRAGMA table_info(checks)`).all().map((c) => c.name);
+  if (!columns.includes('detail_json')) db.exec(`ALTER TABLE checks ADD COLUMN detail_json TEXT`);
+
   const insert = db.prepare(`
     INSERT INTO checks (check_id, endpoint_id, ts, attempt, final, ok, status, category, technical,
-      dns_ms, tcp_ms, tls_ms, ttfb_ms, download_ms, total_ms, next_retry_ms, cert_valid_to, body_snippet)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      dns_ms, tcp_ms, tls_ms, ttfb_ms, download_ms, total_ms, next_retry_ms, cert_valid_to, body_snippet, detail_json)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   return {
@@ -42,6 +46,7 @@ export function openDb(path = 'data/monitor.db') {
           a.status ?? null, a.category, a.technical ?? null,
           t.dns ?? null, t.tcp ?? null, t.tls ?? null, t.ttfb ?? null, t.download ?? null, t.total ?? null,
           a.nextRetryInMs ?? null, a.cert?.validTo ?? null, a.bodySnippet ?? null,
+          a.stun ? JSON.stringify(a.stun) : null,
         );
       });
     },
@@ -56,6 +61,20 @@ export function openDb(path = 'data/monitor.db') {
 
     finalsSince(endpointId, sinceIso) {
       return db.prepare(`SELECT ts, ok, category, total_ms FROM checks WHERE endpoint_id = ? AND final = 1 AND ts >= ? ORDER BY ts`).all(endpointId, sinceIso);
+    },
+
+    // All attempts of the most recent check, in order.
+    lastCheck(endpointId) {
+      const last = db.prepare(`SELECT check_id FROM checks WHERE endpoint_id = ? ORDER BY id DESC LIMIT 1`).get(endpointId);
+      if (!last) return [];
+      return db.prepare(`SELECT * FROM checks WHERE check_id = ? ORDER BY attempt`).all(last.check_id);
+    },
+
+    // When the current run of failures started, and how many checks have failed since the last success.
+    failureStreak(endpointId) {
+      const lastOk = db.prepare(`SELECT ts FROM checks WHERE endpoint_id = ? AND final = 1 AND ok = 1 ORDER BY id DESC LIMIT 1`).get(endpointId)?.ts ?? null;
+      const streak = db.prepare(`SELECT MIN(ts) AS firstFailure, COUNT(*) AS failedChecks FROM checks WHERE endpoint_id = ? AND final = 1 AND ok = 0 AND ts > ?`).get(endpointId, lastOk ?? '');
+      return { lastSuccess: lastOk, firstFailure: streak.firstFailure, failedChecks: streak.failedChecks };
     },
 
     history(endpointId, limit = 60) {
