@@ -1,0 +1,8 @@
+[
+  { "id": "mock-ok", "name": "Mock: healthy", "url": "http://localhost:4000/ok", "intervalSec": 15 },
+  { "id": "mock-flaky", "name": "Mock: flaky (500s)", "url": "http://localhost:4000/flaky", "intervalSec": 15 },
+  { "id": "mock-429", "name": "Mock: rate limited", "url": "http://localhost:4000/rate-limited", "intervalSec": 20 },
+  { "id": "mock-401", "name": "Mock: auth failure", "url": "http://localhost:4000/protected", "intervalSec": 20 },
+  { "id": "mock-slow", "name": "Mock: slow", "url": "http://localhost:4000/slow", "timeoutMs": 2000, "intervalSec": 20 },
+  { "id": "mock-down", "name": "Mock: port closed", "url": "http://localhost:4999/ok", "intervalSec": 30 }
+]

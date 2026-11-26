@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>API health monitor</title>
+  <style>
+    :root { --bg:#f7f7f5; --card:#fff; --text:#1f1f1e; --muted:#6b6b66; --line:#e6e5e0;
+            --up:#3b9a57; --degraded:#d39b23; --down:#d2463f; --none:#e3e2dc; --accent:#1E5282; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
+    main { max-width: 1100px; margin: 0 auto; padding: 24px; }
+    header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 16px; }
+    h1 { font-size: 20px; margin: 0; color: var(--accent); font-weight: 600; }
+    .muted { color: var(--muted); font-size: 12px; }
+    .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 16px; }
+    .stat { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; }
+    .stat .v { font-size: 22px; font-weight: 600; }
+    table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+    th, td { text-align: left; padding: 10px 12px; border-top: 1px solid var(--line); vertical-align: middle; }
+    th { font-size: 12px; color: var(--muted); font-weight: 500; border-top: none; }
+    tr.ep { cursor: pointer; }
+    tr.ep:hover { background: #fafaf8; }
+    .pill { display: inline-block; padding: 2px 8px; border-radius: 6px; font-size: 12px; font-weight: 500; }
+    .pill.up { background: #e5f3e9; color: #22663a; }
+    .pill.degraded { background: #fbf1dc; color: #7a5410; }
+    .pill.down { background: #fbe5e4; color: #8c231e; }
+    .bars { display: flex; gap: 2px; min-width: 180px; }
+    .bars span { flex: 1; height: 16px; border-radius: 2px; background: var(--none); }
+    .bars .up { background: var(--up); } .bars .degraded { background: var(--degraded); } .bars .down { background: var(--down); }
+    .warn { color: #a06a00; font-weight: 600; }
+    .detail td { background: #fbfbf9; padding: 16px; }
+    .explain { margin: 0 0 12px; }
+    .explain b { display: inline-block; width: 90px; color: var(--muted); font-weight: 500; }
+    .hist { width: 100%; font-size: 12px; border: none; }
+    .hist th, .hist td { padding: 6px 8px; }
+    code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>API health monitor</h1>
+    <span class="muted" id="updated">Loading…</span>
+  </header>
+
+  <section class="stats">
+    <div class="stat"><div class="muted">Endpoints</div><div class="v" id="s-total">-</div></div>
+    <div class="stat"><div class="muted">Up now</div><div class="v" id="s-up">-</div></div>
+    <div class="stat"><div class="muted">Median latency</div><div class="v" id="s-latency">-</div></div>
+    <div class="stat"><div class="muted">Certs under 14 days</div><div class="v" id="s-certs">-</div></div>
+  </section>
+
+  <table>
+    <thead><tr><th>Endpoint</th><th>Status</th><th>Latency</th><th>Uptime 24h</th><th>Last 24 hours</th><th>SSL expires</th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+  <p class="muted">Click a row to see each attempt, its network timing breakdown and the cause of any failure.</p>
+</main>
+
+<script>
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const ms = (v) => (v == null ? '-' : `${Math.round(v)} ms`);
+  let openId = null;
+  let lastData = null;
+
+  function statusPill(latest) {
+    if (!latest) return '<span class="muted">Waiting</span>';
+    if (latest.ok) return `<span class="pill up">${latest.status} OK</span>`;
+    const soft = ['rate_limit', 'timeout'].includes(latest.category);
+    const label = latest.status ? `${latest.status} ${latest.category.replace('_', ' ')}` : latest.category.replace('_', ' ');
+    return `<span class="pill ${soft ? 'degraded' : 'down'}">${esc(label)}</span>`;
+  }
+
+  function render(data) {
+    lastData = data;
+    const eps = data.endpoints;
+    const up = eps.filter((e) => e.latest?.ok).length;
+    const lat = eps.filter((e) => e.latest?.ok && e.latest.totalMs != null).map((e) => e.latest.totalMs).sort((a, b) => a - b);
+    document.getElementById('s-total').textContent = eps.length;
+    document.getElementById('s-up').textContent = `${up} / ${eps.length}`;
+    document.getElementById('s-latency').textContent = lat.length ? ms(lat[Math.floor(lat.length / 2)]) : '-';
+    document.getElementById('s-certs').textContent = eps.filter((e) => e.cert?.warning).length;
+    document.getElementById('updated').textContent = `Updated ${new Date(data.generatedAt).toLocaleTimeString()}`;
+
+    document.getElementById('rows').innerHTML = eps.map((e) => `
+      <tr class="ep" data-id="${esc(e.id)}">
+        <td><div>${esc(e.name)}</div><div class="muted"><code>${esc(e.method)} ${esc(e.url)}</code></div></td>
+        <td>${statusPill(e.latest)}</td>
+        <td>${ms(e.latest?.totalMs)}</td>
+        <td>${e.uptime24h == null ? '-' : e.uptime24h + '%'}</td>
+        <td><div class="bars">${e.buckets.map((b) => `<span class="${b}"></span>`).join('')}</div></td>
+        <td>${e.cert ? `<span class="${e.cert.warning ? 'warn' : ''}">${e.cert.daysLeft} days</span>` : '<span class="muted">n/a</span>'}</td>
+      </tr>
+      ${openId === e.id ? `<tr class="detail"><td colspan="6" id="detail-${esc(e.id)}">Loading history…</td></tr>` : ''}
+    `).join('');
+
+    if (openId) loadDetail(openId);
+  }
+
+  async function loadDetail(id) {
+    const cell = document.getElementById(`detail-${id}`);
+    if (!cell) return;
+    const { history } = await (await fetch(`/api/history/${encodeURIComponent(id)}`)).json();
+    const last = history[0];
+    cell.innerHTML = `
+      ${last ? `<p class="explain"><b>Technical</b>${esc(last.technical)}</p><p class="explain"><b>Plain</b>${esc(last.plain)}</p>` : ''}
+      <table class="hist">
+        <thead><tr><th>Time</th><th>Attempt</th><th>Result</th><th>DNS</th><th>TCP</th><th>TLS</th><th>Server (TTFB)</th><th>Download</th><th>Total</th><th>Next retry</th></tr></thead>
+        <tbody>${history.map((h) => `
+          <tr>
+            <td>${new Date(h.ts).toLocaleTimeString()}</td>
+            <td>${h.attempt + 1}</td>
+            <td>${h.ok ? 'OK' : esc(h.category)} <span class="muted">${esc(h.technical)}</span></td>
+            <td>${ms(h.dns_ms)}</td><td>${ms(h.tcp_ms)}</td><td>${ms(h.tls_ms)}</td>
+            <td>${ms(h.ttfb_ms)}</td><td>${ms(h.download_ms)}</td><td>${ms(h.total_ms)}</td>
+            <td>${h.next_retry_ms ? `${(h.next_retry_ms / 1000).toFixed(1)} s` : '-'}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>`;
+  }
+
+  document.getElementById('rows').addEventListener('click', (ev) => {
+    const row = ev.target.closest('tr.ep');
+    if (!row) return;
+    openId = openId === row.dataset.id ? null : row.dataset.id;
+    if (lastData) render(lastData);
+  });
+
+  async function refresh() {
+    try {
+      render(await (await fetch('/api/status')).json());
+    } catch (err) {
+      document.getElementById('updated').textContent = `Can't reach the monitor: ${err.message}`;
+    }
+  }
+  refresh();
+  setInterval(refresh, 10000);
+</script>
+</body>
+</html>

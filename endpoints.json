@@ -1,0 +1,10 @@
+[
+  { "id": "github", "name": "GitHub API", "url": "https://api.github.com/zen", "headers": { "User-Agent": "api-health-monitor" }, "intervalSec": 60 },
+  { "id": "open-meteo", "name": "Open-Meteo", "url": "https://api.open-meteo.com/v1/forecast?latitude=49.28&longitude=-123.12&current=temperature_2m", "intervalSec": 60 },
+  { "id": "jsonplaceholder", "name": "JSONPlaceholder", "url": "https://jsonplaceholder.typicode.com/posts/1", "intervalSec": 60 },
+  { "id": "rate-limited", "name": "Rate-limited demo", "url": "https://httpbin.org/status/429", "intervalSec": 120 },
+  { "id": "auth-demo", "name": "Auth failure demo", "url": "https://httpbin.org/status/401", "intervalSec": 120 },
+  { "id": "slow-demo", "name": "Slow service demo", "url": "https://httpbin.org/delay/5", "timeoutMs": 3000, "intervalSec": 120 },
+  { "id": "expired-cert", "name": "Expired certificate demo", "url": "https://expired.badssl.com/", "intervalSec": 300 },
+  { "id": "dns-demo", "name": "DNS failure demo", "url": "https://no-such-host.invalid/health", "intervalSec": 300 }
+]

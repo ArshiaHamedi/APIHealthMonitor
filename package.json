@@ -1,0 +1,20 @@
+{
+  "name": "api-health-monitor",
+  "version": "0.1.0",
+  "description": "Monitors REST APIs: availability, latency by network stage (DNS, TCP, TLS), failure classification, retries with backoff and certificate expiry.",
+  "type": "module",
+  "main": "src/index.js",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning src/index.js",
+    "start:local": "node --disable-warning=ExperimentalWarning src/index.js endpoints.local.json",
+    "mock": "node mock/server.js",
+    "test": "node --test --disable-warning=ExperimentalWarning"
+  },
+  "dependencies": {
+    "express": "^5.1.0"
+  },
+  "license": "MIT"
+}
